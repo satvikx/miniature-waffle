@@ -63,30 +63,37 @@ class AddTrainView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        # Additional checks for admin
-        if not request.user.is_admin:
+        #checks for admin
+        if not request.user.is_staff:
             return Response(
-                {"error": "Only administrators can add trains"}, 
+                {"error": "Only administrators can add trains"},
                 status=status.HTTP_403_FORBIDDEN
             )
-
+        
         serializer = TrainSerializer(data=request.data)
         if serializer.is_valid():
             train = serializer.save()
+            
+            # Log the number of seats created
+            # available_seats = train.seats.filter(is_booked=False).count()
+            available_seats = train.available_seats
             return Response({
                 "message": "Train added successfully",
                 "train": {
                     "train_no": train.train_no,
                     "source": train.source,
-                    "destination": train.destination
+                    "destination": train.destination,
+                    "total_seats": train.total_seats,
+                    "available_seats": available_seats
                 }
             }, status=status.HTTP_201_CREATED)
-        
+       
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
 
 
 class TrainAvailabilityView(APIView):
+                        # Find trains matching the source and destination
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -105,7 +112,6 @@ class TrainAvailabilityView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Find trains matching the source and destination
         trains = Train.objects.filter(
             source__icontains=source, 
             destination__icontains=destination
@@ -124,45 +130,50 @@ class TrainAvailabilityView(APIView):
 
 class SeatBookingView(APIView):
     permission_classes = [IsAuthenticated]
-
+    
     @transaction.atomic
     def post(self, request):
         train_no = request.data.get('train_no')
-        
-        # Validate input
+       
         if not train_no:
             return Response(
                 {"error": "Train number is required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
+        
         try:
-            train = Train.objects.get(train_no=train_no)
-            available_seat = Seat.objects.filter(
-                train=train, 
+            # Explicitly lock the train object to prevent race conditions
+            train = Train.objects.select_for_update().get(train_no=train_no)
+            
+            # Findavailable seat
+            available_seat = Seat.objects.select_for_update().filter(
+                train=train,
                 is_booked=False
             ).first()
-
-            # print(available_seat)
-
+            
+            #Check seats
             if not available_seat:
                 return Response(
                     {"error": "No seats available on this train"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-
-            # Create booking
+            
+            #booking
             booking = Booking.objects.create(
                 user=request.user,
                 train=train,
                 seat=available_seat
             )
-
-            # Mark seat as booked
+            print(available_seat)
+            # mking seat as booked
             available_seat.is_booked = True
             available_seat.booked_by = request.user
             available_seat.save()
-
+            
+            # reduce count
+            train.available_seats = train.seats.filter(is_booked=False).count()
+            train.save()
+            
             return Response({
                 "message": "Seat booked successfully",
                 "booking_details": {
@@ -170,10 +181,11 @@ class SeatBookingView(APIView):
                     "train_no": train.train_no,
                     "seat_no": available_seat.seat_no,
                     "source": train.source,
-                    "destination": train.destination
+                    "destination": train.destination,
+                    "available_seats": train.available_seats
                 }
             }, status=status.HTTP_201_CREATED)
-
+        
         except Train.DoesNotExist:
             return Response(
                 {"error": "Train not found"},
@@ -183,8 +195,7 @@ class SeatBookingView(APIView):
             return Response(
                 {"error": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-        
+            )        
 
 class BookingDetailsView(APIView):
     permission_classes = [IsAuthenticated]

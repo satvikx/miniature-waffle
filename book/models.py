@@ -45,42 +45,48 @@ class User(AbstractBaseUser, PermissionsMixin):
 
 class Train(models.Model):
     train_no = models.CharField(
-        max_length=20, 
-        primary_key=True, 
+        max_length=20,
+        primary_key=True,
         unique=True
     )
     source = models.CharField(max_length=100)
     destination = models.CharField(max_length=100)
     total_seats = models.IntegerField(default=5)
+    available_seats = models.IntegerField(default=0)
 
-    def create_seats(self, total_seats=None):
+    def create_seats(self):
         """
-        Code Non Funtional Due to some reason/ Automatically add seats to train
-        
+        Automatically add seats to train
         """
-
-        # Clear existing seats if needed
-        # self.seats.all().delete()
+        #to prevent duplicate creation
+        self.seats.all().delete()
 
         # Create seats
-        seats_to_create = []
-        for seat_no in range(1, total_seats + 1):
-            seats_to_create.append(
-                Seat(
-                    train=self,
-                    seat_no=f'{seat_no}',  # Convert to string
-                    is_booked=False
-                )
-            )
-        
+        seats_to_create = [
+            Seat(
+                train=self,
+                seat_no=f'{seat_no}',  # Convert to string
+                is_booked=False
+            ) for seat_no in range(1, self.total_seats + 1)
+        ]
+       
+        # Bulk create seats
         Seat.objects.bulk_create(seats_to_create)
         
-        self.total_seats = total_seats
+        self.available_seats = self.total_seats
         self.save()
+
+    def save(self, *args, **kwargs):
+#Save the train
+        super().save(*args, **kwargs)
+        
+        # Create seats after saving if not already created
+        if self.total_seats > 0 and self.seats.count() == 0:
+            self.create_seats()
 
     def __str__(self):
         return f"{self.train_no} - {self.source} to {self.destination}"
-
+    
 class Seat(models.Model):
     class Meta:
         unique_together = ['seat_no', 'train']

@@ -45,7 +45,8 @@ class TrainSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'train_no': {'required': True},
             'source': {'required': True},
-            'destination': {'required': True}
+            'destination': {'required': True},
+            'total_seats': {'required': True, 'min_value': 1}
         }
 
 class TrainAvailabilitySerializer(serializers.ModelSerializer):
